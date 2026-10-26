@@ -1,0 +1,130 @@
+[
+  {
+    "id": "t01",
+    "title": "Salary — Acme Corp",
+    "category": "Income",
+    "date": 1751996400,
+    "amount": "3200.00",
+    "currency": "EUR"
+  },
+  {
+    "id": "t02",
+    "title": "Grocery Store",
+    "category": "Groceries",
+    "date": 1751906400,
+    "amount": "-64.30",
+    "currency": "EUR"
+  },
+  {
+    "id": "t03",
+    "title": "Transfer to Alex",
+    "category": "Transfer",
+    "date": 1751902800,
+    "amount": "-120.00",
+    "currency": "EUR"
+  },
+  {
+    "id": "t04",
+    "title": "Coffee Roasters",
+    "category": "Dining",
+    "date": 1751812800,
+    "amount": "-4.80",
+    "currency": "EUR"
+  },
+  {
+    "id": "t05",
+    "title": "Refund — Zalando",
+    "category": "Shopping",
+    "date": 1751809200,
+    "amount": "39.99",
+    "currency": "EUR"
+  },
+  {
+    "id": "t06",
+    "title": "Electricity Bill",
+    "category": "Utilities",
+    "date": 1751719200,
+    "amount": "-88.10",
+    "currency": "EUR"
+  },
+  {
+    "id": "t07",
+    "title": "Exchange EUR → USD",
+    "category": "Exchange",
+    "date": 1751715600,
+    "amount": "-500.00",
+    "currency": "EUR"
+  },
+  {
+    "id": "t08",
+    "title": "Freelance Payout",
+    "category": "Income",
+    "date": 1751625600,
+    "amount": "740.00",
+    "currency": "USD"
+  },
+  {
+    "id": "t09",
+    "title": "App Store",
+    "category": "Digital",
+    "date": 1751622000,
+    "amount": "-9.99",
+    "currency": "EUR"
+  },
+  {
+    "id": "t10",
+    "title": "Restaurant Bella",
+    "category": "Dining",
+    "date": 1751532000,
+    "amount": "-52.40",
+    "currency": "EUR"
+  },
+  {
+    "id": "t12",
+    "title": "Transfer from Mia",
+    "category": "Transfer",
+    "date": 1751481600,
+    "amount": "85.00",
+    "currency": "EUR"
+  },
+  {
+    "id": "t11",
+    "title": "Pharmacy",
+    "category": "Health",
+    "date": 1751442000,
+    "amount": "-18.75",
+    "currency": "EUR"
+  },
+  {
+    "id": "t13",
+    "title": "Gym Membership",
+    "category": "Health",
+    "date": 1751391600,
+    "amount": "-29.90",
+    "currency": "EUR"
+  },
+  {
+    "id": "t14",
+    "title": "Fuel Station",
+    "category": "Transport",
+    "date": 1751301600,
+    "amount": "-61.20",
+    "currency": "EUR"
+  },
+  {
+    "id": "t15",
+    "title": "Book Depository",
+    "category": "Shopping",
+    "date": 1751211600,
+    "amount": "-23.45",
+    "currency": "EUR"
+  },
+  {
+    "id": "t16",
+    "title": "Interest",
+    "category": "Income",
+    "date": 1751121600,
+    "amount": "12.06",
+    "currency": "USD"
+  }
+]

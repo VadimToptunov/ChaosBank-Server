@@ -1,0 +1,31 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    name: Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: gradle/actions/setup-gradle@v4
+      - run: ./gradlew test
+
+  docker:
+    name: Docker image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and smoke-test the image
+        run: |
+          docker compose up -d --build
+          for i in $(seq 1 60); do curl -sf localhost:8080/health && break; sleep 1; done
+          curl -sf localhost:8080/v1/accounts/EUR | grep -q '"balance":"4820.55"'
+          docker compose down

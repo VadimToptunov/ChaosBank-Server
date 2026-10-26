@@ -1,0 +1,17 @@
+[
+  {
+    "name": "EUR Main",
+    "currency": "EUR",
+    "balance": "4820.55"
+  },
+  {
+    "name": "USD Savings",
+    "currency": "USD",
+    "balance": "12750.00"
+  },
+  {
+    "name": "GBP Travel",
+    "currency": "GBP",
+    "balance": "640.20"
+  }
+]

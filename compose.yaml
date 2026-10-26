@@ -1,0 +1,10 @@
+services:
+  chaosbank-server:
+    build: .
+    image: chaosbank-server
+    ports:
+      - "8080:8080"
+    environment:
+      # Switch defects on for the default session (the one used without X-Chaos-Session):
+      CHAOS_DEFAULT_PROFILE: ${CHAOS_DEFAULT_PROFILE:-}
+      CHAOS_DEFAULT_DEFECTS: ${CHAOS_DEFAULT_DEFECTS:-}
