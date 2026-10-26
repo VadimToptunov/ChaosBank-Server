@@ -83,14 +83,14 @@ fun Application.module(
      * and replays the first success for a repeated key.
      */
     suspend fun <T> RoutingContext.moneyWrite(
-        ctx: Ctx, serializer: KSerializer<T>, write: (T) -> Pair<HttpStatusCode, String>,
+        ctx: Ctx, serializer: KSerializer<T>, after: AfterWrite = AfterWrite.answer, write: suspend (T) -> Pair<HttpStatusCode, String>,
     ) {
         val key = call.request.headers[IDEMPOTENCY_HEADER]?.takeIf { it.isNotBlank() }
             ?: throw ApiError(HttpStatusCode.BadRequest, "idempotencyKeyRequired", "money writes need an $IDEMPOTENCY_HEADER header")
         val request = wireJson.decodeFromString(serializer, call.receiveText())
         if (ctx.session.config.network == NetworkCondition.flaky) ctx.bank.failIfFlaky()
         val fingerprint = call.request.local.uri + " " + wireJson.encodeToString(serializer, request)
-        val replay = ctx.bank.idempotent(key, fingerprint) {
+        val replay = ctx.bank.idempotent(key, fingerprint, ctx.chaos, after) {
             val (status, body) = write(request)
             Replay(status.value, body)
         }
@@ -168,7 +168,12 @@ fun Application.module(
                 val raw = call.parameters["currency"]!!
                 val account = Currency.entries.firstOrNull { it.name == raw.uppercase() }?.let { ctx.bank.account(it, ctx.chaos) }
                     ?: throw BankException(BankError.unknownAccount, "no account in '$raw'")
-                call.respond(account.toDto())
+                // `contractFieldRenamed`: this one endpoint calls the balance "amount".
+                if (ctx.chaos.isActive(ServerDefects.contractFieldRenamed)) {
+                    call.respond(mapOf("name" to account.name, "currency" to account.currency.name, "amount" to account.balance.toPlainString()))
+                } else {
+                    call.respond(account.toDto())
+                }
             }
         }
 
@@ -191,8 +196,9 @@ fun Application.module(
 
         post("/v1/transfers") {
             signedIn { ctx, _ ->
-                moneyWrite(ctx, TransferRequest.serializer()) { req ->
-                    val tx = ctx.bank.transfer(currency(req.from), money(req.amount), req.recipient.trim(), ctx.now)
+                val after = if (ctx.chaos.isActive(ServerDefects.timeoutAsSuccess)) AfterWrite.rememberThenTimeOut else AfterWrite.answer
+                moneyWrite(ctx, TransferRequest.serializer(), after) { req ->
+                    val tx = ctx.bank.transfer(currency(req.from), money(req.amount), req.recipient.trim(), ctx.now, ctx.chaos)
                     HttpStatusCode.Created to wireJson.encodeToString(TransactionDto.serializer(), tx.toDto())
                 }
             }
@@ -216,7 +222,7 @@ fun Application.module(
         post("/v1/exchanges") {
             signedIn { ctx, _ ->
                 moneyWrite(ctx, ExchangeRequest.serializer()) { req ->
-                    val fx = ctx.bank.exchange(currency(req.sell), currency(req.get), money(req.amount), ctx.now)
+                    val fx = ctx.bank.exchange(currency(req.sell), currency(req.get), money(req.amount), ctx.now, ctx.chaos)
                     HttpStatusCode.Created to wireJson.encodeToString(ExchangeDto.serializer(), fx.toDto())
                 }
             }
@@ -226,13 +232,14 @@ fun Application.module(
 
         get("/v1/assets") { signedIn { ctx, _ -> call.respond(ctx.bank.assets().map { it.toDto() }) } }
 
-        get("/v1/holdings") { signedIn { ctx, _ -> call.respond(ctx.bank.holdings().map { it.toDto() }) } }
+        get("/v1/holdings") { signedIn { ctx, _ -> call.respond(ctx.bank.holdings(ctx.chaos).map { it.toDto() }) } }
 
         get("/v1/orders") { signedIn { ctx, _ -> call.respond(ctx.bank.orders().map { it.toDto() }) } }
 
         post("/v1/orders") {
             signedIn { ctx, _ ->
-                moneyWrite(ctx, OrderRequest.serializer()) { req ->
+                val after = if (ctx.chaos.isActive(ServerDefects.orderFilledTwiceOnRetry)) AfterWrite.forgetThenTimeOut else AfterWrite.answer
+                moneyWrite(ctx, OrderRequest.serializer(), after) { req ->
                     val side = OrderSide.entries.firstOrNull { it.name == req.side }
                         ?: throw ApiError(HttpStatusCode.BadRequest, "invalidSide", "side is buy or sell")
                     val type = OrderType.entries.firstOrNull { it.name == req.type }
@@ -263,7 +270,7 @@ fun Application.module(
         get("/chaos/catalog") {
             call.respond(
                 CatalogDto(
-                    catalog.specs.map { DefectDto(it.id, it.title, it.area) },
+                    catalog.specs.map { DefectDto(it.id, it.title, it.area, it.category, it.severity, it.requirement, it.task) },
                     catalog.profiles.mapValues { it.value.sorted() },
                 ),
             )

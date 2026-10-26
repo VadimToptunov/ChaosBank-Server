@@ -16,32 +16,13 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
-/** Each server defect: green on clean, red under exactly its own defect. */
-class ServerDefectTest {
-    @Test
-    fun `balanceReadReturnsZero zeroes balances and nothing else`() = app {
-        val api = Api.fresh(client)
-        assertEquals("4820.55", api.balance("EUR"))
-        assertEquals("0", api.get("/v1/accounts/EUR", defects = ServerDefects.balanceReadReturnsZero).str("balance"))
-        assertEquals(16, api.get("/v1/transactions", defects = ServerDefects.balanceReadReturnsZero).obj["items"]!!.jsonArray.size)
-    }
-
-    @Test
-    fun `transactionsDupOnFetch doubles every row and nothing else`() = app {
-        val api = Api.fresh(client)
-        assertEquals(16, api.historyIds().toSet().size)
-        assertEquals(16, api.historyIds().size)
-        assertEquals(32, api.get("/v1/transactions", defects = ServerDefects.transactionsDupOnFetch).obj["items"]!!.jsonArray.size)
-        assertEquals("4820.55", api.get("/v1/accounts/EUR", defects = ServerDefects.transactionsDupOnFetch).str("balance"))
-    }
-}
-
 class ChaosApiTest {
     @Test
     fun `the catalog lists every server defect and the clean profile`() = app {
         val catalog = Api(client).get("/chaos/catalog").obj
         val ids = catalog["defects"]!!.jsonArray.map { it.jsonObject["id"]!!.jsonPrimitive.content }
         assertEquals(ServerDefects.catalog.specs.map { it.id }, ids)
+        assertTrue(catalog["profiles"]!!.jsonObject.keys.containsAll(listOf("clean", "money", "state", "network", "contract", "all")))
         assertEquals(JsonArray(emptyList()), catalog["profiles"]!!.jsonObject["clean"])
     }
 

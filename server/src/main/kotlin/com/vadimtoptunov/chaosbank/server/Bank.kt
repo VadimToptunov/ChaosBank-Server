@@ -1,9 +1,10 @@
 package com.vadimtoptunov.chaosbank.server
 
 import com.vadimtoptunov.chaosbank.chaos.ActiveDefects
-import com.vadimtoptunov.chaosbank.chaos.DefectCatalog
-import com.vadimtoptunov.chaosbank.chaos.DefectSpec
 import com.vadimtoptunov.chaosbank.chaos.SeededRng
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.math.BigDecimal
 import java.math.RoundingMode
 import java.util.UUID
@@ -60,6 +61,16 @@ object FxRates {
     val feeRate = BigDecimal("0.005")
 
     fun rate(from: Currency, to: Currency): BigDecimal = perEUR.getValue(to).divide(perEUR.getValue(from), 10, RoundingMode.HALF_EVEN)
+
+    /** An hour-old quote, for `fxRateStaleOnServer`. */
+    private val stalePerEUR: Map<Currency, BigDecimal> = mapOf(
+        Currency.EUR to BigDecimal.ONE,
+        Currency.USD to BigDecimal("1.06"),
+        Currency.GBP to BigDecimal("0.86"),
+    )
+
+    fun staleRate(from: Currency, to: Currency): BigDecimal =
+        stalePerEUR.getValue(to).divide(stalePerEUR.getValue(from), 10, RoundingMode.HALF_EVEN)
 }
 
 /** The apps' `BackendError`, with the HTTP status each maps to. */
@@ -75,19 +86,6 @@ enum class BankError(val status: Int) {
 }
 
 class BankException(val error: BankError, val detail: String) : Exception(detail)
-
-/** Server-side defects. Ids match the apps' where the defect is the same one. */
-object ServerDefects {
-    const val balanceReadReturnsZero = "balanceReadReturnsZero"
-    const val transactionsDupOnFetch = "transactionsDupOnFetch"
-
-    val catalog = DefectCatalog(
-        listOf(
-            DefectSpec(balanceReadReturnsZero, "Balance read returns zero on error", "Accounts"),
-            DefectSpec(transactionsDupOnFetch, "Every transaction fetched twice", "Transactions"),
-        ),
-    )
-}
 
 /**
  * One session's bank: the authoritative state, all money math correct (BigDecimal),
@@ -129,13 +127,19 @@ class BankState(private val seed: Long = 0) {
         val all = if (chaos.isActive(ServerDefects.transactionsDupOnFetch)) transactions.flatMap { listOf(it, it) } else transactions
         val from = (cursor ?: 0).coerceIn(0, all.size)
         val to = if (limit == null) all.size else minOf(all.size, from + limit)
-        return Page(all.subList(from, to).toList(), if (to < all.size) to else null)
+        // `paginationCursorSkips`: the next cursor is one past the page end, so a row is lost per page.
+        val next = if (to < all.size) (if (chaos.isActive(ServerDefects.paginationCursorSkips)) to + 1 else to) else null
+        return Page(all.subList(from, to).toList(), next)
     }
 
     fun assets(): List<Asset> = Seed.assets
 
     @Synchronized
-    fun holdings(): List<Holding> = Seed.assets.mapNotNull { holdings[it.symbol] }
+    fun holdings(chaos: ActiveDefects): List<Holding> {
+        // `staleHoldingsAfterOrder`: serve the seed snapshot instead of the live portfolio.
+        val source = if (chaos.isActive(ServerDefects.staleHoldingsAfterOrder)) Seed.holdings.associateBy { it.symbol } else holdings
+        return Seed.assets.mapNotNull { source[it.symbol] }
+    }
 
     @Synchronized
     fun orders(): List<Order> = orders.toList()
@@ -167,21 +171,69 @@ class BankState(private val seed: Long = 0) {
      * the first response without touching money; the same key on a different request is
      * refused. Only successes are remembered, as in the apps' `processedKeys`.
      */
-    @Synchronized
-    fun idempotent(key: String, fingerprint: String, write: () -> Replay): Replay {
-        replays[key]?.let {
-            if (it.fingerprint != fingerprint) throw IdempotencyConflict(key)
-            return it.copy(replayed = true)
+    /** Money writes run one at a time per session (check the key, apply, remember the result). */
+    private val writes = Mutex()
+
+    suspend fun idempotent(
+        key: String, fingerprint: String, chaos: ActiveDefects, after: AfterWrite = AfterWrite.answer,
+        write: suspend () -> Replay,
+    ): Replay =
+        // `lostUpdateNoLock`: writes no longer take the lock, so concurrent ones interleave.
+        if (chaos.isActive(ServerDefects.lostUpdateNoLock)) once(key, fingerprint, chaos, after, write)
+        else writes.withLock { once(key, fingerprint, chaos, after, write) }
+
+    private suspend fun once(
+        key: String, fingerprint: String, chaos: ActiveDefects, after: AfterWrite, write: suspend () -> Replay,
+    ): Replay {
+        // `retryDuplicate`: the ledger of used keys is never consulted, so a retry pays again.
+        if (!chaos.isActive(ServerDefects.retryDuplicate)) {
+            synchronized(this) { replays[key] }?.let {
+                if (it.fingerprint != fingerprint) throw IdempotencyConflict(key)
+                return it.copy(replayed = true)
+            }
         }
-        return write().copy(fingerprint = fingerprint).also { replays[key] = it }
+        val result = write().copy(fingerprint = fingerprint)
+        when (after) {
+            AfterWrite.answer -> synchronized(this) { replays[key] = result }
+            // `timeoutAsSuccess`: applied and remembered, but the caller is told it timed out.
+            AfterWrite.rememberThenTimeOut -> {
+                synchronized(this) { replays[key] = result }
+                throw BankException(BankError.timeout, "the write timed out")
+            }
+            // `orderFilledTwiceOnRetry`: applied but not remembered, so a retry with the same key applies again.
+            AfterWrite.forgetThenTimeOut -> throw BankException(BankError.timeout, "the write timed out")
+        }
+        return result
     }
 
-    @Synchronized
-    fun transfer(from: Currency, amount: BigDecimal, recipient: String, now: Long): Transaction {
-        if (amount.signum() <= 0) throw BankException(BankError.invalidAmount, "amount must be positive")
+    suspend fun transfer(from: Currency, amount: BigDecimal, recipient: String, now: Long, chaos: ActiveDefects): Transaction {
+        // `lostUpdateNoLock`: read the balance, let other requests in, then write it back.
+        if (chaos.isActive(ServerDefects.lostUpdateNoLock)) {
+            val seen = synchronized(this) { validateTransfer(from, amount, chaos) }
+            delay(LOST_UPDATE_WINDOW_MS)
+            return synchronized(this) { recordTransfer(from, amount, recipient, now, seen.balance - debited(amount, chaos)) }
+        }
+        return synchronized(this) {
+            val account = validateTransfer(from, amount, chaos)
+            recordTransfer(from, amount, recipient, now, account.balance - debited(amount, chaos))
+        }
+    }
+
+    private fun validateTransfer(from: Currency, amount: BigDecimal, chaos: ActiveDefects): Account {
+        // `negativeAmountCredits`: only zero is refused, so a negative amount gets through and credits.
+        val refused = if (chaos.isActive(ServerDefects.negativeAmountCredits)) amount.signum() == 0 else amount.signum() <= 0
+        if (refused) throw BankException(BankError.invalidAmount, "amount must be positive")
         val account = accounts[from] ?: throw BankException(BankError.unknownAccount, "no account in $from")
         if (account.balance < amount) throw BankException(BankError.insufficientFunds, "$from balance is ${account.balance.toPlainString()}")
-        accounts[from] = account.copy(balance = account.balance - amount)
+        return account
+    }
+
+    /** `serverRoundsDown`: the debit drops the cents. */
+    private fun debited(amount: BigDecimal, chaos: ActiveDefects): BigDecimal =
+        if (chaos.isActive(ServerDefects.serverRoundsDown)) amount.setScale(0, RoundingMode.DOWN) else amount
+
+    private fun recordTransfer(from: Currency, amount: BigDecimal, recipient: String, now: Long, newBalance: BigDecimal): Transaction {
+        accounts[from] = accounts.getValue(from).copy(balance = newBalance)
         val title = if (recipient.isEmpty()) "Transfer" else "Transfer to $recipient"
         return Transaction(nextId("tx"), title, "Transfer", now, amount.negate(), from).also { transactions.add(0, it) }
     }
@@ -196,7 +248,7 @@ class BankState(private val seed: Long = 0) {
 
     /** Sells [amount] of [sell]; the server prices it: (amount − 0.5% fee) × rate, to the cent. */
     @Synchronized
-    fun exchange(sell: Currency, get: Currency, amount: BigDecimal, now: Long): Exchange {
+    fun exchange(sell: Currency, get: Currency, amount: BigDecimal, now: Long, chaos: ActiveDefects): Exchange {
         if (sell == get) throw BankException(BankError.sameCurrency, "sell and get are both $sell")
         if (amount.signum() <= 0) throw BankException(BankError.invalidAmount, "amount must be positive")
         val from = accounts[sell] ?: throw BankException(BankError.unknownAccount, "no account in $sell")
@@ -204,7 +256,9 @@ class BankState(private val seed: Long = 0) {
         if (from.balance < amount) throw BankException(BankError.insufficientFunds, "$sell balance is ${from.balance.toPlainString()}")
         val rate = FxRates.rate(sell, get)
         val fee = amount * FxRates.feeRate
-        val credited = ((amount - fee) * rate).setScale(2, RoundingMode.HALF_EVEN)
+        // `fxRateStaleOnServer`: credit at an hour-old rate while reporting the current one.
+        val applied = if (chaos.isActive(ServerDefects.fxRateStaleOnServer)) FxRates.staleRate(sell, get) else rate
+        val credited = ((amount - fee) * applied).setScale(2, RoundingMode.HALF_EVEN)
         accounts[sell] = from.copy(balance = from.balance - amount)
         accounts[get] = to.copy(balance = to.balance + credited)
         val tx = Transaction(nextId("fx"), "Exchange $sell → $get", "Exchange", now, credited, get).also { transactions.add(0, it) }
@@ -263,6 +317,12 @@ class BankState(private val seed: Long = 0) {
 }
 
 data class Page<T>(val items: List<T>, val nextOffset: Int?)
+
+/** What a money write does once applied: answer, or (for two defects) time out. */
+enum class AfterWrite { answer, rememberThenTimeOut, forgetThenTimeOut }
+
+/** How long `lostUpdateNoLock` leaves between reading and writing a balance. */
+const val LOST_UPDATE_WINDOW_MS = 40L
 
 /** A stored response for an idempotent replay: status plus the JSON body as sent. */
 data class Replay(val status: Int, val body: String, val fingerprint: String = "", val replayed: Boolean = false)

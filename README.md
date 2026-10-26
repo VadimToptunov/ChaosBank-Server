@@ -10,9 +10,10 @@ and you also get real HTTP, an API to test, and defects that live on the server 
 The defects work like the apps' ones. The code is correct, each defect is a guarded deviation, and you switch
 them on per session or per request.
 
-> **Status: stage 2 of 5.** Sign-in, accounts, transfers, exchange, orders, idempotency,
-> the Slow and Flaky networks, and an OpenAPI contract the tests enforce. Next: the apps
-> learn to talk to it (stage 3), then the server-side defect catalog (stage 4).
+> **Status: stage 4a of 5.** Sign-in, accounts, transfers, exchange, orders, idempotency,
+> the Slow and Flaky networks, an OpenAPI contract the tests enforce, the apps talking to
+> it (`CHAOSBANK_BACKEND` / `-ChaosBankBackend`), and 12 server-side defects. Next:
+> auth and security defects (4b), then live prices and KYC (stage 5).
 
 ## Run it
 
@@ -96,6 +97,35 @@ the session's `seed`, using the same draws as the apps, so a failing run reprodu
 
 `CHAOS_DEFAULT_PROFILE` / `CHAOS_DEFAULT_DEFECTS` switch defects on for the default session,
 for demos and take-home assignments. `JWT_SECRET` keeps tokens valid across restarts.
+
+## Server defects
+
+Twelve, each one guarded deviation with a test pair: green on a clean session, red under
+exactly that defect. `GET /chaos/catalog` lists them with their requirement and the task
+a tester is given. Ids match the apps' where it's the same defect, so an app running
+against the server forwards it and it behaves as on the embedded mock.
+
+| Defect | Category | What breaks |
+| --- | --- | --- |
+| `balanceReadReturnsZero` | State | balance reads answer 0 |
+| `transactionsDupOnFetch` | State | every history row comes back twice |
+| `staleHoldingsAfterOrder` | State | holdings ignore a filled order |
+| `lostUpdateNoLock` | State | concurrent transfers overwrite each other's debit |
+| `paginationCursorSkips` | State | a row is lost at every page edge |
+| `retryDuplicate` | Network | a repeated Idempotency-Key pays again |
+| `timeoutAsSuccess` | Network | a transfer answers 504 but was applied |
+| `orderFilledTwiceOnRetry` | Network | an order answers 504, and a retry with the same key fills it again |
+| `serverRoundsDown` | Money | a debit drops its cents |
+| `negativeAmountCredits` | Money | a negative transfer adds money |
+| `fxRateStaleOnServer` | Money | an exchange is credited at a rate other than the one it reports |
+| `contractFieldRenamed` | Contract | one endpoint calls `balance` `amount` |
+
+Profiles: `money`, `state`, `network`, `contract`, `all`.
+
+Some are invisible in a clean app's UI on purpose. For example, a 504 with the money
+gone looks like an ordinary error until you check the balance. Others only show through
+the API (`contractFieldRenamed`), a proxy, or concurrency (`lostUpdateNoLock`). Finding
+which side is lying is the exercise.
 
 ## Tests
 
