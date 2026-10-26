@@ -140,6 +140,17 @@ class BankState(private val seed: Long = 0) {
     @Synchronized
     fun orders(): List<Order> = orders.toList()
 
+    // Sync playground ----------------------------------------------------------
+    // The apps' reliability cluster: a shared counter with an atomic increment
+    // (correct) plus separate read and write calls (for the lost-update race).
+
+    private var syncCounter = 0
+
+    @Synchronized fun syncValue(): Int = syncCounter
+    @Synchronized fun syncSet(value: Int): Int { syncCounter = value; return syncCounter }
+    @Synchronized fun syncIncrement(): Int { syncCounter += 1; return syncCounter }
+    @Synchronized fun syncReset(): Int { syncCounter = 0; return syncCounter }
+
     // Writes -----------------------------------------------------------------
 
     /**

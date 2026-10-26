@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: ChaosBank API
-  version: 0.2.0
+  version: 0.3.0
   description: |
     The backend of ChaosBank, a deliberately buggy neobank for mobile QA practice.
     The code is correct; defects are switched on per chaos session (`X-Chaos-Session`)
@@ -20,6 +20,7 @@ tags:
   - name: accounts
   - name: money
   - name: markets
+  - name: sync
   - name: chaos
   - name: meta
 
@@ -338,6 +339,66 @@ paths:
         "422": { $ref: "#/components/responses/Problem" }
         "504": { $ref: "#/components/responses/Problem" }
 
+  /v1/sync/counter:
+    get:
+      tags: [sync]
+      summary: The sync playground's shared counter
+      security: [{ bearer: [] }]
+      parameters: [{ $ref: "#/components/parameters/Session" }, { $ref: "#/components/parameters/Defects" }]
+      responses:
+        "200":
+          description: The counter
+          content: { application/json: { schema: { $ref: "#/components/schemas/Counter" } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+
+    put:
+      tags: [sync]
+      summary: Write the counter (a read-then-write pair races; that's the lesson)
+      security: [{ bearer: [] }]
+      parameters: [{ $ref: "#/components/parameters/Session" }, { $ref: "#/components/parameters/Defects" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/Counter" }
+      responses:
+        "200":
+          description: The counter
+          content: { application/json: { schema: { $ref: "#/components/schemas/Counter" } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+
+  /v1/sync/counter/increment:
+    post:
+      tags: [sync]
+      summary: Atomic +1
+      security: [{ bearer: [] }]
+      parameters: [{ $ref: "#/components/parameters/Session" }, { $ref: "#/components/parameters/Defects" }]
+      responses:
+        "200":
+          description: The counter
+          content: { application/json: { schema: { $ref: "#/components/schemas/Counter" } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+
+  /v1/sync/counter/reset:
+    post:
+      tags: [sync]
+      summary: Back to 0
+      security: [{ bearer: [] }]
+      parameters: [{ $ref: "#/components/parameters/Session" }, { $ref: "#/components/parameters/Defects" }]
+      responses:
+        "200":
+          description: The counter
+          content: { application/json: { schema: { $ref: "#/components/schemas/Counter" } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+
   /chaos/catalog:
     get:
       tags: [chaos]
@@ -578,6 +639,13 @@ components:
         executionPrice: { $ref: "#/components/schemas/Money" }
         status: { type: string, enum: [pending, filled, rejected] }
         placedAt: { type: integer }
+
+    Counter:
+      type: object
+      required: [value]
+      additionalProperties: false
+      properties:
+        value: { type: integer }
 
     LoginRequest:
       type: object
