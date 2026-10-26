@@ -19,6 +19,21 @@ object Seed {
         Account("GBP Travel", Currency.GBP, BigDecimal("640.20")),
     )
 
+    val assets: List<Asset> = listOf(
+        Asset("AAPL", "Apple Inc.", AssetKind.stock, Currency.USD, BigDecimal("189.50")),
+        Asset("MSFT", "Microsoft Corp.", AssetKind.stock, Currency.USD, BigDecimal("415.20")),
+        Asset("NVDA", "NVIDIA Corp.", AssetKind.stock, Currency.USD, BigDecimal("875.30")),
+        Asset("TSLA", "Tesla Inc.", AssetKind.stock, Currency.USD, BigDecimal("242.10")),
+        Asset("BTC", "Bitcoin", AssetKind.crypto, Currency.USD, BigDecimal("64200.00")),
+        Asset("ETH", "Ethereum", AssetKind.crypto, Currency.USD, BigDecimal("3120.00")),
+    )
+
+    val holdings: List<Holding> = listOf(
+        Holding("AAPL", BigDecimal("12"), BigDecimal("150.00")),
+        Holding("TSLA", BigDecimal("8"), BigDecimal("280.00")),
+        Holding("ETH", BigDecimal("3.5"), BigDecimal("2400.00")),
+    )
+
     val transactions: List<Transaction> = listOf(
         tx("t01", "Salary — Acme Corp", "Income", 0, "3200.00", Currency.EUR),
         tx("t02", "Grocery Store", "Groceries", 1, "-64.30", Currency.EUR),
