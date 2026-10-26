@@ -69,6 +69,9 @@ data class OrderDto(
 )
 
 @Serializable
+data class CounterDto(val value: Int)
+
+@Serializable
 data class LoginRequest(val username: String, val password: String)
 
 @Serializable

@@ -204,3 +204,15 @@ class OrderTest {
         assertEquals("12750.00", api.balance("USD"), "nothing moved")
     }
 }
+
+class SyncCounterTest {
+    @Test
+    fun `increments are atomic, set and reset write the value`() = app {
+        val api = Api.fresh(client)
+        repeat(5) { api.post("/v1/sync/counter/increment") }
+        assertEquals("5", api.get("/v1/sync/counter").str("value"))
+        assertEquals("42", api.call(io.ktor.http.HttpMethod.Put, "/v1/sync/counter", """{"value":42}""").str("value"))
+        assertEquals("0", api.post("/v1/sync/counter/reset").str("value"))
+        assertEquals("0", Api.fresh(client).get("/v1/sync/counter").str("value"), "each session has its own counter")
+    }
+}

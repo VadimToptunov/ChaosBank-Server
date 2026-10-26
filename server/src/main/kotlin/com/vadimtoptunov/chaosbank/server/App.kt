@@ -246,6 +246,18 @@ fun Application.module(
             }
         }
 
+        // --- sync playground ----------------------------------------------------
+
+        get("/v1/sync/counter") { signedIn { ctx, _ -> call.respond(CounterDto(ctx.bank.syncValue())) } }
+
+        put("/v1/sync/counter") {
+            signedIn { ctx, _ -> call.respond(CounterDto(ctx.bank.syncSet(body<CounterDto>().value))) }
+        }
+
+        post("/v1/sync/counter/increment") { signedIn { ctx, _ -> call.respond(CounterDto(ctx.bank.syncIncrement())) } }
+
+        post("/v1/sync/counter/reset") { signedIn { ctx, _ -> call.respond(CounterDto(ctx.bank.syncReset())) } }
+
         // --- chaos control ------------------------------------------------------
 
         get("/chaos/catalog") {
