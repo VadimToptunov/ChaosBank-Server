@@ -17,4 +17,7 @@ class SeededRng(seed: Long) {
 
     /** Uniform double in [0, 1). */
     fun nextDouble(): Double = (next() shr 11).toLong().toDouble() / (1L shl 53).toDouble()
+
+    /** Uniform double in [min, max). */
+    fun nextInRange(min: Double, max: Double): Double = min + nextDouble() * (max - min)
 }

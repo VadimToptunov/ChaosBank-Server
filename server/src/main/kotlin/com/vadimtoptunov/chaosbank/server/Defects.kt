@@ -29,6 +29,15 @@ object ServerDefects {
     // Contract
     const val contractFieldRenamed = "contractFieldRenamed"
 
+    // Realtime
+    const val wsPricesOutOfOrder = "wsPricesOutOfOrder"
+
+    // KYC (the apps' ids)
+    const val kycAcceptsExpiredDocument = "kycAcceptsExpiredDocument"
+    const val kycNameMismatchAccepted = "kycNameMismatchAccepted"
+    const val kycSelfieMismatchAccepted = "kycSelfieMismatchAccepted"
+    const val kycStuckPending = "kycStuckPending"
+
     private fun d(id: String, title: String, area: String, category: String, severity: String, requirement: String, task: String) =
         DefectSpec(id, title, area, category, severity, requirement, task)
 
@@ -70,12 +79,29 @@ object ServerDefects {
             d(contractFieldRenamed, "One endpoint renames balance to amount", "Accounts", "Contract", "major",
                 "Every response matches openapi.yaml.",
                 "Find the endpoint whose response breaks the published contract."),
+            d(wsPricesOutOfOrder, "Price stream delivers ticks out of order", "Markets", "Realtime", "major",
+                "The price stream delivers ticks in seq order; a client never shows an older price after a newer one.",
+                "Show that the stream's seq numbers go backwards."),
+            d(kycAcceptsExpiredDocument, "Expired document passes KYC", "KYC", "Validation", "critical",
+                "A document past its expiry date is rejected.",
+                "Submit an expired document and show it gets verified."),
+            d(kycNameMismatchAccepted, "Someone else's document passes KYC", "KYC", "Validation", "critical",
+                "A document whose name isn't the account holder's is rejected.",
+                "Submit a document with another name and show it gets verified."),
+            d(kycSelfieMismatchAccepted, "A non-matching face passes KYC", "KYC", "Validation", "critical",
+                "A selfie that doesn't match the document is rejected.",
+                "Submit a mismatching selfie and show it gets verified."),
+            d(kycStuckPending, "Approved KYC stays pending", "KYC", "State", "major",
+                "A check that passes ends verified.",
+                "Submit a valid document and show the status never leaves pending."),
         ),
         mapOf(
             "money" to setOf(serverRoundsDown, negativeAmountCredits, fxRateStaleOnServer),
             "state" to setOf(balanceReadReturnsZero, transactionsDupOnFetch, staleHoldingsAfterOrder, lostUpdateNoLock, paginationCursorSkips),
             "network" to setOf(retryDuplicate, timeoutAsSuccess, orderFilledTwiceOnRetry),
             "contract" to setOf(contractFieldRenamed),
+            "realtime" to setOf(wsPricesOutOfOrder),
+            "kyc" to setOf(kycAcceptsExpiredDocument, kycNameMismatchAccepted, kycSelfieMismatchAccepted, kycStuckPending),
         ).let { it + ("all" to it.values.flatten().toSet()) },
     )
 }

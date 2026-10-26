@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: ChaosBank API
-  version: 0.4.0
+  version: 0.5.0
   description: |
     The backend of ChaosBank, a deliberately buggy neobank for mobile QA practice.
     The code is correct; defects are switched on per chaos session (`X-Chaos-Session`)
@@ -20,6 +20,7 @@ tags:
   - name: accounts
   - name: money
   - name: markets
+  - name: kyc
   - name: sync
   - name: chaos
   - name: meta
@@ -339,6 +340,71 @@ paths:
         "422": { $ref: "#/components/responses/Problem" }
         "504": { $ref: "#/components/responses/Problem" }
 
+  /v1/quotes:
+    get:
+      tags: [markets]
+      summary: Current prices from the session's feed
+      description: The apps' simulated feed, step for step (same seed, one tick per 700 ms).
+      security: [{ bearer: [] }]
+      parameters: [{ $ref: "#/components/parameters/Session" }, { $ref: "#/components/parameters/Defects" }]
+      responses:
+        "200":
+          description: The latest tick
+          content: { application/json: { schema: { $ref: "#/components/schemas/PriceTick" } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+
+  /v1/prices/stream:
+    get:
+      tags: [markets]
+      summary: Live prices over WebSocket
+      description: |
+        Upgrade to a WebSocket with the same session and token headers as REST. Each text
+        frame is a `PriceTick` JSON object: first the current prices, then one per tick.
+        A refused connection closes with code 1008.
+      security: [{ bearer: [] }]
+      parameters: [{ $ref: "#/components/parameters/Session" }, { $ref: "#/components/parameters/Defects" }]
+      responses:
+        "101": { description: Switching protocols; frames are PriceTick JSON }
+
+  /v1/kyc/status:
+    get:
+      tags: [kyc]
+      summary: Identity verification status (a new session starts verified)
+      security: [{ bearer: [] }]
+      parameters: [{ $ref: "#/components/parameters/Session" }, { $ref: "#/components/parameters/Defects" }]
+      responses:
+        "200":
+          description: Status
+          content: { application/json: { schema: { $ref: "#/components/schemas/KycStatus" } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+
+  /v1/kyc/submissions:
+    post:
+      tags: [kyc]
+      summary: Submit what the document scan and the face check read; the server decides
+      description: |
+        The apps' review rules, in their order: an expired document, then a name other than
+        the account holder's (VADIM TOPTUNOV), then a non-matching face are rejected.
+        An unreadable scan is `invalidDocument`, no face is `noFace`.
+      security: [{ bearer: [] }]
+      parameters: [{ $ref: "#/components/parameters/Session" }, { $ref: "#/components/parameters/Defects" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/KycSubmission" }
+      responses:
+        "201":
+          description: Decided
+          content: { application/json: { schema: { $ref: "#/components/schemas/KycStatus" } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+
   /v1/sync/counter:
     get:
       tags: [sync]
@@ -640,6 +706,47 @@ components:
         status: { type: string, enum: [pending, filled, rejected] }
         placedAt: { type: integer }
 
+    Quote:
+      type: object
+      required: [symbol, price, dayOpen, dayHigh, dayLow, direction]
+      additionalProperties: false
+      properties:
+        symbol: { type: string }
+        price: { $ref: "#/components/schemas/Money" }
+        dayOpen: { $ref: "#/components/schemas/Money" }
+        dayHigh: { $ref: "#/components/schemas/Money" }
+        dayLow: { $ref: "#/components/schemas/Money" }
+        direction: { type: string, enum: [up, down, flat] }
+
+    PriceTick:
+      type: object
+      required: [seq, quotes]
+      additionalProperties: false
+      properties:
+        seq: { type: integer, description: ticks since the session started; frames arrive in seq order }
+        quotes: { type: array, items: { $ref: "#/components/schemas/Quote" } }
+
+    KycSubmission:
+      type: object
+      required: [document, selfie]
+      properties:
+        document:
+          type: object
+          properties:
+            kind: { type: string, enum: [passport, idCard] }
+            name: { type: [string, "null"] }
+            number: { type: [string, "null"] }
+            expiry: { type: [string, "null"], format: date }
+        selfie: { type: string, enum: [match, mismatch, noFace] }
+
+    KycStatus:
+      type: object
+      required: [status, reason]
+      additionalProperties: false
+      properties:
+        status: { type: string, enum: [unverified, pending, verified, rejected] }
+        reason: { type: [string, "null"] }
+
     Counter:
       type: object
       required: [value]
@@ -733,7 +840,7 @@ components:
               id: { type: string }
               title: { type: string }
               area: { type: string }
-              category: { type: string, enum: [Money, State, Network, Contract, Security] }
+              category: { type: string, enum: [Money, State, Network, Contract, Realtime, Validation, Security] }
               severity: { type: string, enum: [minor, major, critical] }
               requirement: { type: string, description: what correct code does }
               task: { type: string, description: what a tester is asked to prove }

@@ -16,12 +16,14 @@ dependencies {
     implementation(libs.ktor.server.netty)
     implementation(libs.ktor.server.content.negotiation)
     implementation(libs.ktor.server.call.logging)
+    implementation(libs.ktor.server.websockets)
     implementation(libs.ktor.serialization.json)
     implementation(libs.logback)
 
     testImplementation(kotlin("test"))
     testImplementation(libs.ktor.server.test.host)
     testImplementation(libs.snakeyaml)
+    testImplementation(libs.ktor.client.websockets)
 }
 
 tasks.test { useJUnitPlatform() }

@@ -72,6 +72,21 @@ data class OrderDto(
 data class CounterDto(val value: Int)
 
 @Serializable
+data class QuoteDto(val symbol: String, val price: String, val dayOpen: String, val dayHigh: String, val dayLow: String, val direction: String)
+
+@Serializable
+data class PriceTickDto(val seq: Long, val quotes: List<QuoteDto>)
+
+@Serializable
+data class KycDocumentDto(val kind: String = "passport", val name: String? = null, val number: String? = null, val expiry: String? = null)
+
+@Serializable
+data class KycSubmissionRequest(val document: KycDocumentDto, val selfie: String)
+
+@Serializable
+data class KycStatusDto(val status: String, val reason: String?)
+
+@Serializable
 data class LoginRequest(val username: String, val password: String)
 
 @Serializable
@@ -135,6 +150,12 @@ fun Transaction.toDto() = TransactionDto(id, title, category, date, amount.toPla
 fun Exchange.toDto() = ExchangeDto(transaction.toDto(), debited.toPlainString(), credited.toPlainString(), rate.toPlainString(), fee.toPlainString())
 
 fun Asset.toDto() = AssetDto(symbol, name, kind.name, currency.name, basePrice.toPlainString())
+
+fun PriceTick.toDto() = PriceTickDto(seq, quotes.map {
+    QuoteDto(it.symbol, it.price.toPlainString(), it.dayOpen.toPlainString(), it.dayHigh.toPlainString(), it.dayLow.toPlainString(), it.direction.name)
+})
+
+fun KycDecision.toDto() = KycStatusDto(status.name, reason)
 
 fun Holding.toDto() = HoldingDto(symbol, quantity.toPlainString(), avgCost.toPlainString())
 
