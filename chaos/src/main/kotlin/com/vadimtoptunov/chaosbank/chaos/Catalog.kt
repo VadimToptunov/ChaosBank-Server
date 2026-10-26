@@ -1,7 +1,19 @@
 package com.vadimtoptunov.chaosbank.chaos
 
-/** One switchable defect. [id] is used verbatim in headers, sessions and `exercises`. */
-data class DefectSpec(val id: String, val title: String, val area: String)
+/**
+ * One switchable defect, in the shape of the apps' `exercises.json` entries. [id] is used
+ * verbatim in headers, sessions and exercises; [requirement] is what correct code does,
+ * [task] what a tester is asked to prove.
+ */
+data class DefectSpec(
+    val id: String,
+    val title: String,
+    val area: String,
+    val category: String = "",
+    val severity: String = "major",
+    val requirement: String = "",
+    val task: String = "",
+)
 
 /**
  * The defects a server knows, plus named profiles (bundles of defects). Profiles may only

@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: ChaosBank API
-  version: 0.3.0
+  version: 0.4.0
   description: |
     The backend of ChaosBank, a deliberately buggy neobank for mobile QA practice.
     The code is correct; defects are switched on per chaos session (`X-Chaos-Session`)
@@ -727,12 +727,16 @@ components:
           type: array
           items:
             type: object
-            required: [id, title, area]
+            required: [id, title, area, category, severity, requirement, task]
             additionalProperties: false
             properties:
               id: { type: string }
               title: { type: string }
               area: { type: string }
+              category: { type: string, enum: [Money, State, Network, Contract, Security] }
+              severity: { type: string, enum: [minor, major, critical] }
+              requirement: { type: string, description: what correct code does }
+              task: { type: string, description: what a tester is asked to prove }
         profiles:
           type: object
           additionalProperties: { type: array, items: { type: string } }

@@ -111,7 +111,15 @@ data class SessionDto(
 )
 
 @Serializable
-data class DefectDto(val id: String, val title: String, val area: String)
+data class DefectDto(
+    val id: String,
+    val title: String,
+    val area: String,
+    val category: String,
+    val severity: String,
+    val requirement: String,
+    val task: String,
+)
 
 @Serializable
 data class CatalogDto(val defects: List<DefectDto>, val profiles: Map<String, List<String>>)
