@@ -27,5 +27,10 @@ jobs:
         run: |
           docker compose up -d --build
           for i in $(seq 1 60); do curl -sf localhost:8080/health && break; sleep 1; done
-          curl -sf localhost:8080/v1/accounts/EUR | grep -q '"balance":"4820.55"'
+          C=$(curl -sf -X POST localhost:8080/v1/auth/login -H 'Content-Type: application/json' \
+                -d '{"username":"ci","password":"ci"}' | sed -E 's/.*"challengeId":"([^"]+)".*/\1/')
+          T=$(curl -sf -X POST localhost:8080/v1/auth/otp -H 'Content-Type: application/json' \
+                -d "{\"challengeId\":\"$C\",\"code\":\"424242\"}" | sed -E 's/.*"accessToken":"([^"]+)".*/\1/')
+          curl -sf localhost:8080/v1/accounts/EUR -H "Authorization: Bearer $T" | grep -q '"balance":"4820.55"'
+          curl -sf localhost:8080/openapi.yaml | grep -q 'openapi: 3.1.0'
           docker compose down

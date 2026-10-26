@@ -1,0 +1,679 @@
+openapi: 3.1.0
+info:
+  title: ChaosBank API
+  version: 0.2.0
+  description: |
+    The backend of ChaosBank, a deliberately buggy neobank for mobile QA practice.
+    The code is correct; defects are switched on per chaos session (`X-Chaos-Session`)
+    or per request (`X-Chaos-Defects`). Money is a decimal string, dates are epoch
+    seconds, errors are RFC 9457 problem+json.
+
+    Sign in: `POST /v1/auth/login` → `POST /v1/auth/otp` with the demo code `424242`
+    → send `Authorization: Bearer <accessToken>`.
+  license:
+    name: MIT
+servers:
+  - url: http://localhost:8080
+
+tags:
+  - name: auth
+  - name: accounts
+  - name: money
+  - name: markets
+  - name: chaos
+  - name: meta
+
+paths:
+  /health:
+    get:
+      tags: [meta]
+      summary: Liveness
+      responses:
+        "200":
+          description: Up
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status: { type: string, const: ok }
+
+  /openapi.yaml:
+    get:
+      tags: [meta]
+      summary: This document
+      responses:
+        "200": { description: The spec, content: { application/yaml: {} } }
+
+  /docs:
+    get:
+      tags: [meta]
+      summary: Swagger UI for this document
+      responses:
+        "200": { description: HTML page, content: { text/html: {} } }
+
+  /v1/auth/login:
+    post:
+      tags: [auth]
+      summary: Username and password → an OTP challenge
+      description: Any non-empty username and password pass, as in the apps; the OTP is the real gate.
+      parameters: [{ $ref: "#/components/parameters/Session" }, { $ref: "#/components/parameters/Defects" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/LoginRequest" }
+      responses:
+        "200":
+          description: Code "sent"
+          content: { application/json: { schema: { $ref: "#/components/schemas/Challenge" } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+
+  /v1/auth/otp:
+    post:
+      tags: [auth]
+      summary: OTP → access and refresh tokens
+      description: The code is valid for 20 s; three wrong codes lock the challenge until a resend.
+      parameters: [{ $ref: "#/components/parameters/Session" }, { $ref: "#/components/parameters/Defects" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/OtpRequest" }
+      responses:
+        "200":
+          description: Signed in
+          content: { application/json: { schema: { $ref: "#/components/schemas/TokenPair" } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "429": { $ref: "#/components/responses/Problem" }
+
+  /v1/auth/otp/resend:
+    post:
+      tags: [auth]
+      summary: A new code for the same challenge, after a 30 s cooldown
+      parameters: [{ $ref: "#/components/parameters/Session" }, { $ref: "#/components/parameters/Defects" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ResendRequest" }
+      responses:
+        "200":
+          description: Code "re-sent"; attempts reset
+          content: { application/json: { schema: { $ref: "#/components/schemas/Challenge" } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "429": { $ref: "#/components/responses/Problem" }
+
+  /v1/auth/refresh:
+    post:
+      tags: [auth]
+      summary: A refresh token → a new pair; each refresh token works once
+      parameters: [{ $ref: "#/components/parameters/Session" }, { $ref: "#/components/parameters/Defects" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RefreshRequest" }
+      responses:
+        "200":
+          description: New pair
+          content: { application/json: { schema: { $ref: "#/components/schemas/TokenPair" } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+
+  /v1/auth/logout:
+    post:
+      tags: [auth]
+      summary: Ends this access token and the user's refresh tokens
+      security: [{ bearer: [] }]
+      parameters: [{ $ref: "#/components/parameters/Session" }, { $ref: "#/components/parameters/Defects" }]
+      responses:
+        "204": { description: Logged out }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+
+  /v1/accounts:
+    get:
+      tags: [accounts]
+      summary: The three accounts, EUR, USD, GBP
+      security: [{ bearer: [] }]
+      parameters: [{ $ref: "#/components/parameters/Session" }, { $ref: "#/components/parameters/Defects" }]
+      responses:
+        "200":
+          description: Accounts
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/Account" } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+
+  /v1/accounts/{currency}:
+    get:
+      tags: [accounts]
+      summary: One account
+      security: [{ bearer: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/Session" }
+        - { $ref: "#/components/parameters/Defects" }
+        - { name: currency, in: path, required: true, schema: { type: string, example: EUR } }
+      responses:
+        "200":
+          description: The account
+          content: { application/json: { schema: { $ref: "#/components/schemas/Account" } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+
+  /v1/transactions:
+    get:
+      tags: [accounts]
+      summary: History, newest first
+      security: [{ bearer: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/Session" }
+        - { $ref: "#/components/parameters/Defects" }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100 } }
+        - { name: cursor, in: query, description: "`nextCursor` of the previous page", schema: { type: string } }
+      responses:
+        "200":
+          description: A page
+          content: { application/json: { schema: { $ref: "#/components/schemas/TransactionPage" } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+
+  /v1/transfers:
+    post:
+      tags: [money]
+      summary: Send money
+      security: [{ bearer: [] }]
+      parameters: [{ $ref: "#/components/parameters/Session" }, { $ref: "#/components/parameters/Defects" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TransferRequest" }
+      responses:
+        "201":
+          description: Sent; a repeat with the same key answers this again with `Idempotent-Replayed`
+          content: { application/json: { schema: { $ref: "#/components/schemas/Transaction" } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "504": { $ref: "#/components/responses/Problem" }
+
+  /v1/deposits:
+    post:
+      tags: [money]
+      summary: Add money
+      security: [{ bearer: [] }]
+      parameters: [{ $ref: "#/components/parameters/Session" }, { $ref: "#/components/parameters/Defects" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DepositRequest" }
+      responses:
+        "201":
+          description: Credited
+          content: { application/json: { schema: { $ref: "#/components/schemas/Transaction" } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "504": { $ref: "#/components/responses/Problem" }
+
+  /v1/fx/rates:
+    get:
+      tags: [money]
+      summary: Mid-market rates against EUR and the exchange fee
+      security: [{ bearer: [] }]
+      parameters: [{ $ref: "#/components/parameters/Session" }, { $ref: "#/components/parameters/Defects" }]
+      responses:
+        "200":
+          description: Rates
+          content: { application/json: { schema: { $ref: "#/components/schemas/FxRates" } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+
+  /v1/exchanges:
+    post:
+      tags: [money]
+      summary: Sell one currency for another; the server prices it
+      description: credited = (amount − 0.5% fee) × rate, rounded half-even to the cent.
+      security: [{ bearer: [] }]
+      parameters: [{ $ref: "#/components/parameters/Session" }, { $ref: "#/components/parameters/Defects" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ExchangeRequest" }
+      responses:
+        "201":
+          description: Exchanged
+          content: { application/json: { schema: { $ref: "#/components/schemas/Exchange" } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "504": { $ref: "#/components/responses/Problem" }
+
+  /v1/assets:
+    get:
+      tags: [markets]
+      summary: Tradable assets with their reference price
+      security: [{ bearer: [] }]
+      parameters: [{ $ref: "#/components/parameters/Session" }, { $ref: "#/components/parameters/Defects" }]
+      responses:
+        "200":
+          description: Assets
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/Asset" } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+
+  /v1/holdings:
+    get:
+      tags: [markets]
+      summary: The portfolio
+      security: [{ bearer: [] }]
+      parameters: [{ $ref: "#/components/parameters/Session" }, { $ref: "#/components/parameters/Defects" }]
+      responses:
+        "200":
+          description: Holdings, in asset order
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/Holding" } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+
+  /v1/orders:
+    get:
+      tags: [markets]
+      summary: Orders placed in this session, newest first
+      security: [{ bearer: [] }]
+      parameters: [{ $ref: "#/components/parameters/Session" }, { $ref: "#/components/parameters/Defects" }]
+      responses:
+        "200":
+          description: Orders
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/Order" } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+    post:
+      tags: [markets]
+      summary: Buy or sell; fills at once
+      description: |
+        A market order fills at `referencePrice` (the price the client showed), a limit
+        order at `limitPrice`, as in the apps' mock. Cash is the USD account.
+      security: [{ bearer: [] }]
+      parameters: [{ $ref: "#/components/parameters/Session" }, { $ref: "#/components/parameters/Defects" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/OrderRequest" }
+      responses:
+        "201":
+          description: Filled
+          content: { application/json: { schema: { $ref: "#/components/schemas/Order" } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "504": { $ref: "#/components/responses/Problem" }
+
+  /chaos/catalog:
+    get:
+      tags: [chaos]
+      summary: The server's defects and profiles
+      responses:
+        "200":
+          description: Catalog
+          content: { application/json: { schema: { $ref: "#/components/schemas/Catalog" } } }
+
+  /chaos/sessions:
+    post:
+      tags: [chaos]
+      summary: A new isolated session with its own data and defects
+      requestBody:
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SessionRequest" }
+      responses:
+        "201":
+          description: Created; send its id as `X-Chaos-Session`
+          content: { application/json: { schema: { $ref: "#/components/schemas/Session" } } }
+        "400": { $ref: "#/components/responses/Problem" }
+
+  /chaos/sessions/{id}:
+    parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+    get:
+      tags: [chaos]
+      summary: A session
+      responses:
+        "200":
+          description: The session
+          content: { application/json: { schema: { $ref: "#/components/schemas/Session" } } }
+        "404": { $ref: "#/components/responses/Problem" }
+    put:
+      tags: [chaos]
+      summary: Replace the session's defects (and optionally its network); data is kept
+      requestBody:
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SessionRequest" }
+      responses:
+        "200":
+          description: Updated
+          content: { application/json: { schema: { $ref: "#/components/schemas/Session" } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+    delete:
+      tags: [chaos]
+      summary: Drop a session
+      responses:
+        "204": { description: Gone }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+
+  /chaos/sessions/{id}/reset:
+    parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+    post:
+      tags: [chaos]
+      summary: Back to the seed data and the wall clock; defects kept
+      responses:
+        "200":
+          description: Reset
+          content: { application/json: { schema: { $ref: "#/components/schemas/Session" } } }
+        "404": { $ref: "#/components/responses/Problem" }
+
+  /chaos/sessions/{id}/clock:
+    parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+    post:
+      tags: [chaos]
+      summary: Move the session's clock forward (OTP and token expiry without waiting)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ClockRequest" }
+      responses:
+        "200":
+          description: Moved; `now` is the session's new time
+          content: { application/json: { schema: { $ref: "#/components/schemas/Session" } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+
+components:
+  securitySchemes:
+    bearer: { type: http, scheme: bearer, bearerFormat: JWT }
+
+  parameters:
+    Session:
+      name: X-Chaos-Session
+      in: header
+      description: A chaos session id; without it, the clean `default` session.
+      schema: { type: string }
+    Defects:
+      name: X-Chaos-Defects
+      in: header
+      description: Comma-separated defect ids switched on for this request only.
+      schema: { type: string }
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: Any unique string per intended write; a repeat replays the first success.
+      schema: { type: string }
+
+  responses:
+    Problem:
+      description: RFC 9457 problem details
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+
+  schemas:
+    Money:
+      type: string
+      pattern: '^-?\d+(\.\d+)?$'
+      example: "4820.55"
+    Currency:
+      type: string
+      enum: [EUR, USD, GBP]
+
+    Account:
+      type: object
+      required: [name, currency, balance]
+      additionalProperties: false
+      properties:
+        name: { type: string }
+        currency: { $ref: "#/components/schemas/Currency" }
+        balance: { $ref: "#/components/schemas/Money" }
+
+    Transaction:
+      type: object
+      required: [id, title, category, date, amount, currency]
+      additionalProperties: false
+      properties:
+        id: { type: string }
+        title: { type: string }
+        category: { type: string }
+        date: { type: integer, description: epoch seconds }
+        amount: { $ref: "#/components/schemas/Money" }
+        currency: { $ref: "#/components/schemas/Currency" }
+
+    TransactionPage:
+      type: object
+      required: [items, nextCursor]
+      additionalProperties: false
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/Transaction" } }
+        nextCursor: { type: [string, "null"] }
+
+    TransferRequest:
+      type: object
+      required: [from, amount]
+      properties:
+        from: { $ref: "#/components/schemas/Currency" }
+        amount: { $ref: "#/components/schemas/Money" }
+        recipient: { type: string }
+        note: { type: string }
+
+    DepositRequest:
+      type: object
+      required: [to, amount]
+      properties:
+        to: { $ref: "#/components/schemas/Currency" }
+        amount: { $ref: "#/components/schemas/Money" }
+        title: { type: string, default: Add money }
+
+    ExchangeRequest:
+      type: object
+      required: [sell, get, amount]
+      properties:
+        sell: { $ref: "#/components/schemas/Currency" }
+        get: { $ref: "#/components/schemas/Currency" }
+        amount: { $ref: "#/components/schemas/Money" }
+
+    Exchange:
+      type: object
+      required: [transaction, debited, credited, rate, fee]
+      additionalProperties: false
+      properties:
+        transaction: { $ref: "#/components/schemas/Transaction" }
+        debited: { $ref: "#/components/schemas/Money" }
+        credited: { $ref: "#/components/schemas/Money" }
+        rate: { $ref: "#/components/schemas/Money" }
+        fee: { $ref: "#/components/schemas/Money" }
+
+    FxRates:
+      type: object
+      required: [base, rates, feeRate]
+      additionalProperties: false
+      properties:
+        base: { $ref: "#/components/schemas/Currency" }
+        rates: { type: object, additionalProperties: { $ref: "#/components/schemas/Money" } }
+        feeRate: { $ref: "#/components/schemas/Money" }
+
+    Asset:
+      type: object
+      required: [symbol, name, kind, currency, price]
+      additionalProperties: false
+      properties:
+        symbol: { type: string }
+        name: { type: string }
+        kind: { type: string, enum: [stock, crypto] }
+        currency: { $ref: "#/components/schemas/Currency" }
+        price: { $ref: "#/components/schemas/Money" }
+
+    Holding:
+      type: object
+      required: [symbol, quantity, avgCost]
+      additionalProperties: false
+      properties:
+        symbol: { type: string }
+        quantity: { $ref: "#/components/schemas/Money" }
+        avgCost: { $ref: "#/components/schemas/Money" }
+
+    OrderRequest:
+      type: object
+      required: [symbol, side, quantity, referencePrice]
+      properties:
+        symbol: { type: string }
+        side: { type: string, enum: [buy, sell] }
+        type: { type: string, enum: [market, limit], default: market }
+        quantity: { $ref: "#/components/schemas/Money" }
+        limitPrice: { $ref: "#/components/schemas/Money" }
+        referencePrice: { $ref: "#/components/schemas/Money" }
+
+    Order:
+      type: object
+      required: [id, symbol, side, type, quantity, limitPrice, referencePrice, executionPrice, status, placedAt]
+      additionalProperties: false
+      properties:
+        id: { type: string }
+        symbol: { type: string }
+        side: { type: string, enum: [buy, sell] }
+        type: { type: string, enum: [market, limit] }
+        quantity: { $ref: "#/components/schemas/Money" }
+        limitPrice: { type: [string, "null"] }
+        referencePrice: { $ref: "#/components/schemas/Money" }
+        executionPrice: { $ref: "#/components/schemas/Money" }
+        status: { type: string, enum: [pending, filled, rejected] }
+        placedAt: { type: integer }
+
+    LoginRequest:
+      type: object
+      required: [username, password]
+      properties:
+        username: { type: string }
+        password: { type: string }
+
+    OtpRequest:
+      type: object
+      required: [challengeId, code]
+      properties:
+        challengeId: { type: string }
+        code: { type: string, example: "424242" }
+
+    ResendRequest:
+      type: object
+      required: [challengeId]
+      properties:
+        challengeId: { type: string }
+
+    RefreshRequest:
+      type: object
+      required: [refreshToken]
+      properties:
+        refreshToken: { type: string }
+
+    Challenge:
+      type: object
+      required: [challengeId, expiresIn, resendIn]
+      additionalProperties: false
+      properties:
+        challengeId: { type: string }
+        expiresIn: { type: integer, description: seconds the code stays valid }
+        resendIn: { type: integer, description: seconds until a resend is allowed }
+
+    TokenPair:
+      type: object
+      required: [accessToken, refreshToken, tokenType, expiresIn]
+      additionalProperties: false
+      properties:
+        accessToken: { type: string }
+        refreshToken: { type: string }
+        tokenType: { type: string, const: Bearer }
+        expiresIn: { type: integer }
+
+    SessionRequest:
+      type: object
+      properties:
+        profile: { type: string }
+        defects: { type: array, items: { type: string } }
+        seed: { type: integer }
+        network: { type: string, enum: [normal, slow, flaky] }
+
+    ClockRequest:
+      type: object
+      required: [advanceSeconds]
+      properties:
+        advanceSeconds: { type: integer, minimum: 0 }
+
+    Session:
+      type: object
+      required: [id, profile, defects, seed, network, now]
+      additionalProperties: false
+      properties:
+        id: { type: string }
+        profile: { type: [string, "null"] }
+        defects: { type: array, items: { type: string } }
+        seed: { type: integer }
+        network: { type: string, enum: [normal, slow, flaky] }
+        now: { type: integer, description: the session's clock, epoch seconds }
+
+    Catalog:
+      type: object
+      required: [defects, profiles]
+      additionalProperties: false
+      properties:
+        defects:
+          type: array
+          items:
+            type: object
+            required: [id, title, area]
+            additionalProperties: false
+            properties:
+              id: { type: string }
+              title: { type: string }
+              area: { type: string }
+        profiles:
+          type: object
+          additionalProperties: { type: array, items: { type: string } }
+
+    Problem:
+      type: object
+      required: [type, title, status]
+      properties:
+        type: { type: string }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
