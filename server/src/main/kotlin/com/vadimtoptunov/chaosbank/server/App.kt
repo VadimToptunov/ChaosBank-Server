@@ -29,7 +29,13 @@ import kotlinx.coroutines.delay
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
+import io.ktor.server.websocket.WebSockets
+import io.ktor.server.websocket.webSocket
+import io.ktor.websocket.CloseReason
+import io.ktor.websocket.Frame
+import io.ktor.websocket.close
 import java.math.BigDecimal
+import java.time.LocalDate
 
 const val SESSION_HEADER = "X-Chaos-Session"
 const val DEFECTS_HEADER = "X-Chaos-Defects"
@@ -56,26 +62,37 @@ fun Application.module(
     jwt: Jwt = Jwt(Jwt.randomSecret()),
 ) {
     install(ContentNegotiation) { json(wireJson) }
+    install(WebSockets)
     install(CallLogging)
 
-    /** Resolves the caller's session and header defects, then applies the session's network. */
-    suspend fun RoutingContext.inSession(block: suspend (Ctx) -> Unit) = guarded {
+    /** The caller's session and the defects in force (session + `X-Chaos-Defects`). */
+    fun context(call: ApplicationCall): Ctx {
         val id = call.request.headers[SESSION_HEADER] ?: SessionStore.DEFAULT
         val session = sessions.get(id) ?: throw ApiError(HttpStatusCode.NotFound, "unknownSession", "no chaos session '$id'")
-        val chaos = ActiveDefects.of(catalog, session.config, call.request.headers[DEFECTS_HEADER])
-        if (session.config.network == NetworkCondition.slow) delay(slowDelayMs)
-        block(Ctx(session, chaos))
+        return Ctx(session, ActiveDefects.of(catalog, session.config, call.request.headers[DEFECTS_HEADER]))
     }
 
-    /** [inSession] plus a valid access token for that session; hands the handler the claims. */
-    suspend fun RoutingContext.signedIn(block: suspend (Ctx, Jwt.Claims) -> Unit) = inSession { ctx ->
+    /** The claims of a valid access token for [ctx]'s session, or [AuthException]. */
+    fun authorize(call: ApplicationCall, ctx: Ctx): Jwt.Claims {
         val token = call.request.headers[HttpHeaders.Authorization]?.removePrefix("Bearer ")?.trim()
             ?: throw AuthException(AuthError.unauthorized, "send Authorization: Bearer <accessToken>")
         val claims = jwt.verify(token)
         if (claims == null || claims.type != "access" || claims.session != ctx.session.id ||
             ctx.now >= claims.expiresAt || ctx.bank.auth.isRevoked(claims.id)
         ) throw AuthException(AuthError.unauthorized, "the access token is invalid, expired, logged out or from another session")
-        block(ctx, claims)
+        return claims
+    }
+
+    /** Resolves the caller's session and header defects, then applies the session's network. */
+    suspend fun RoutingContext.inSession(block: suspend (Ctx) -> Unit) = guarded {
+        val ctx = context(call)
+        if (ctx.session.config.network == NetworkCondition.slow) delay(slowDelayMs)
+        block(ctx)
+    }
+
+    /** [inSession] plus a valid access token for that session; hands the handler the claims. */
+    suspend fun RoutingContext.signedIn(block: suspend (Ctx, Jwt.Claims) -> Unit) = inSession { ctx ->
+        block(ctx, authorize(call, ctx))
     }
 
     /**
@@ -253,6 +270,61 @@ fun Application.module(
             }
         }
 
+        // --- prices ---------------------------------------------------------------
+
+        get("/v1/quotes") {
+            signedIn { ctx, _ -> call.respond(ctx.bank.feed.current(System.currentTimeMillis()).toDto()) }
+        }
+
+        /*
+         * One frame per tick: {"seq": n, "quotes": [...]}, starting with the current prices.
+         * Same session and token headers as REST; a refused connection closes with 1008.
+         */
+        webSocket("/v1/prices/stream") {
+            val ctx = try {
+                context(call).also { authorize(call, it) }
+            } catch (e: Exception) {
+                close(CloseReason(CloseReason.Codes.VIOLATED_POLICY, e.message ?: "unauthorized"))
+                return@webSocket
+            }
+            val feed = ctx.bank.feed
+            var last = feed.current(System.currentTimeMillis()).also { send(Frame.Text(tickJson(it))) }.seq
+            // `wsPricesOutOfOrder`: ticks go out in swapped pairs, so seq runs 2, 1, 4, 3, …
+            val swapped = ctx.chaos.isActive(ServerDefects.wsPricesOutOfOrder)
+            var held: PriceTick? = null
+            while (true) {
+                delay(PriceFeed.TICK_MS)
+                for (tick in feed.ticksSince(last, System.currentTimeMillis())) {
+                    last = tick.seq
+                    if (!swapped) { send(Frame.Text(tickJson(tick))); continue }
+                    val first = held
+                    if (first == null) { held = tick; continue }
+                    send(Frame.Text(tickJson(tick)))
+                    send(Frame.Text(tickJson(first)))
+                    held = null
+                }
+            }
+        }
+
+        // --- KYC ----------------------------------------------------------------
+
+        get("/v1/kyc/status") { signedIn { ctx, _ -> call.respond(ctx.bank.kyc.decision.toDto()) } }
+
+        post("/v1/kyc/submissions") {
+            signedIn { ctx, _ ->
+                val req = body<KycSubmissionRequest>()
+                val selfie = KycSelfie.entries.firstOrNull { it.name == req.selfie }
+                    ?: throw ApiError(HttpStatusCode.BadRequest, "invalidBody", "selfie is match, mismatch or noFace")
+                val expiry = req.document.expiry?.let {
+                    runCatching { LocalDate.parse(it) }.getOrNull()
+                        ?: throw BankException(BankError.invalidDocument, "expiry must be YYYY-MM-DD")
+                }
+                val document = KycDocument(req.document.kind, req.document.name, req.document.number, expiry)
+                val today = LocalDate.ofEpochDay(Math.floorDiv(ctx.now, 86_400L))
+                call.respond(HttpStatusCode.Created, ctx.bank.kyc.submit(document, selfie, today, ctx.chaos).toDto())
+            }
+        }
+
         // --- sync playground ----------------------------------------------------
 
         get("/v1/sync/counter") { signedIn { ctx, _ -> call.respond(CounterDto(ctx.bank.syncValue())) } }
@@ -313,6 +385,8 @@ fun Application.module(
         }
     }
 }
+
+private fun tickJson(tick: PriceTick): String = wireJson.encodeToString(PriceTickDto.serializer(), tick.toDto())
 
 private suspend inline fun <reified T> RoutingContext.body(): T = wireJson.decodeFromString(call.receiveText())
 

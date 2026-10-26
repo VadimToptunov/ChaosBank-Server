@@ -107,15 +107,19 @@ class ContractCoverageTest {
         application { module(); app = this }
         startApplication()
         val routes = app.plugin(RoutingRoot).getAllRoutes().mapNotNull { route ->
-            val method = (route.selector as? HttpMethodRouteSelector)?.method ?: return@mapNotNull null
-            "${method.value} ${path(route)}"
+            // A WebSocket's leaf is its Upgrade-header check; the method sits on an ancestor.
+            val methodNode = generateSequence(route) { it.parent }.firstOrNull { it.selector is HttpMethodRouteSelector }
+                ?: return@mapNotNull null
+            "${(methodNode.selector as HttpMethodRouteSelector).method.value} ${path(methodNode)}"
         }.toSet()
         assertEquals(Contract.operations, routes)
     }
 
     private fun path(route: RoutingNode): String {
         val parts = generateSequence(route.parent) { it.parent }.toList().reversed()
-            .map { it.selector.toString() }.filter { it.isNotEmpty() && it != "/" }
+            .map { it.selector.toString() }
+            // Header selectors (a WebSocket's Upgrade check) print as "(...)"; they aren't path.
+            .filter { it.isNotEmpty() && it != "/" && !it.startsWith("(") }
         return "/" + parts.joinToString("/").trim('/')
     }
 }

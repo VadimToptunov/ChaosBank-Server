@@ -166,6 +166,46 @@ class DefectTest {
         assertTrue(problems.any { "missing required 'balance'" in it }, problems.toString())
         assertTrue(problems.any { "undocumented property 'amount'" in it }, problems.toString())
     }
+
+    private fun kyc(name: String = KycReview.ACCOUNT_HOLDER, expiry: String = "2031-04-30", selfie: String = "match") =
+        """{"document":{"kind":"passport","name":"$name","number":"P4916204","expiry":"$expiry"},"selfie":"$selfie"}"""
+
+    @Test
+    fun `kycAcceptsExpiredDocument verifies an expired document`() = app {
+        val api = Api.fresh(client)
+        assertEquals("rejected", api.post("/v1/kyc/submissions", kyc(expiry = "2024-01-31")).str("status"))
+        assertEquals("verified", api.post("/v1/kyc/submissions", kyc(expiry = "2024-01-31"), defects = ServerDefects.kycAcceptsExpiredDocument).str("status"))
+    }
+
+    @Test
+    fun `kycNameMismatchAccepted verifies someone else's document`() = app {
+        val api = Api.fresh(client)
+        assertEquals("rejected", api.post("/v1/kyc/submissions", kyc(name = "ALEX MORGAN")).str("status"))
+        assertEquals("verified", api.post("/v1/kyc/submissions", kyc(name = "ALEX MORGAN"), defects = ServerDefects.kycNameMismatchAccepted).str("status"))
+    }
+
+    @Test
+    fun `kycSelfieMismatchAccepted verifies a face that doesn't match`() = app {
+        val api = Api.fresh(client)
+        assertEquals("rejected", api.post("/v1/kyc/submissions", kyc(selfie = "mismatch")).str("status"))
+        assertEquals("verified", api.post("/v1/kyc/submissions", kyc(selfie = "mismatch"), defects = ServerDefects.kycSelfieMismatchAccepted).str("status"))
+    }
+
+    @Test
+    fun `kycStuckPending leaves a passing check pending`() = app {
+        val api = Api.fresh(client)
+        assertEquals("verified", api.post("/v1/kyc/submissions", kyc()).str("status"))
+        assertEquals("pending", api.post("/v1/kyc/submissions", kyc(), defects = ServerDefects.kycStuckPending).str("status"))
+    }
+
+    @Test
+    fun `wsPricesOutOfOrder sends ticks out of seq order`() = app {
+        val api = Api.fresh(client)
+        val clean = streamSeqs(api, 5)
+        assertEquals(clean.sorted(), clean)
+        val swapped = streamSeqs(api, 5, ServerDefects.wsPricesOutOfOrder)
+        assertTrue(swapped.zipWithNext().any { (a, b) -> b < a }, "seq went backwards: $swapped")
+    }
 }
 
 /** Every defect in the catalog has its test in [DefectTest] (named after its id). */

@@ -26,7 +26,15 @@ data class Transaction(
 
 enum class AssetKind { stock, crypto }
 
-data class Asset(val symbol: String, val name: String, val kind: AssetKind, val currency: Currency, val basePrice: BigDecimal)
+data class Asset(
+    val symbol: String,
+    val name: String,
+    val kind: AssetKind,
+    val currency: Currency,
+    val basePrice: BigDecimal,
+    /** Per-tick volatility of the simulated feed. */
+    val volatility: BigDecimal,
+)
 
 data class Holding(val symbol: String, val quantity: BigDecimal, val avgCost: BigDecimal) {
     val costBasis: BigDecimal get() = quantity * avgCost
@@ -82,6 +90,8 @@ enum class BankError(val status: Int) {
     insufficientHolding(422),
     sameCurrency(400),
     invalidLimitPrice(400),
+    invalidDocument(400),
+    noFace(400),
     timeout(504),
 }
 
@@ -92,7 +102,7 @@ class BankException(val error: BankError, val detail: String) : Exception(detail
  * checks in the same order as the apps' `MockBackend`. Defects are guarded deviations,
  * one per defect. Every method is synchronized: a session is one consistent world.
  */
-class BankState(private val seed: Long = 0) {
+class BankState(private val seed: Long = 0, startMillis: Long = System.currentTimeMillis()) {
     private val accounts = LinkedHashMap(Seed.accounts.associateBy { it.currency })
     private val transactions = Seed.transactions.toMutableList()
     private val assets = Seed.assets.associateBy { it.symbol }
@@ -104,6 +114,8 @@ class BankState(private val seed: Long = 0) {
     private val cashCurrency = Currency.USD
 
     val auth = AuthState()
+    val kyc = KycState()
+    val feed = PriceFeed(seed, startMillis)
 
     private fun nextId(prefix: String): String { sequence += 1; return "$prefix-$sequence" }
 

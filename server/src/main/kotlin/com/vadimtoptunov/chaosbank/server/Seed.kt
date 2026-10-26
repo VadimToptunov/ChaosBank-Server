@@ -20,12 +20,12 @@ object Seed {
     )
 
     val assets: List<Asset> = listOf(
-        Asset("AAPL", "Apple Inc.", AssetKind.stock, Currency.USD, BigDecimal("189.50")),
-        Asset("MSFT", "Microsoft Corp.", AssetKind.stock, Currency.USD, BigDecimal("415.20")),
-        Asset("NVDA", "NVIDIA Corp.", AssetKind.stock, Currency.USD, BigDecimal("875.30")),
-        Asset("TSLA", "Tesla Inc.", AssetKind.stock, Currency.USD, BigDecimal("242.10")),
-        Asset("BTC", "Bitcoin", AssetKind.crypto, Currency.USD, BigDecimal("64200.00")),
-        Asset("ETH", "Ethereum", AssetKind.crypto, Currency.USD, BigDecimal("3120.00")),
+        Asset("AAPL", "Apple Inc.", AssetKind.stock, Currency.USD, BigDecimal("189.50"), BigDecimal("0.004")),
+        Asset("MSFT", "Microsoft Corp.", AssetKind.stock, Currency.USD, BigDecimal("415.20"), BigDecimal("0.0035")),
+        Asset("NVDA", "NVIDIA Corp.", AssetKind.stock, Currency.USD, BigDecimal("875.30"), BigDecimal("0.006")),
+        Asset("TSLA", "Tesla Inc.", AssetKind.stock, Currency.USD, BigDecimal("242.10"), BigDecimal("0.007")),
+        Asset("BTC", "Bitcoin", AssetKind.crypto, Currency.USD, BigDecimal("64200.00"), BigDecimal("0.008")),
+        Asset("ETH", "Ethereum", AssetKind.crypto, Currency.USD, BigDecimal("3120.00"), BigDecimal("0.009")),
     )
 
     val holdings: List<Holding> = listOf(

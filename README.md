@@ -10,10 +10,10 @@ and you also get real HTTP, an API to test, and defects that live on the server 
 The defects work like the apps' ones. The code is correct, each defect is a guarded deviation, and you switch
 them on per session or per request.
 
-> **Status: stage 4a of 5.** Sign-in, accounts, transfers, exchange, orders, idempotency,
-> the Slow and Flaky networks, an OpenAPI contract the tests enforce, the apps talking to
-> it (`CHAOSBANK_BACKEND` / `-ChaosBankBackend`), and 12 server-side defects. Next:
-> auth and security defects (4b), then live prices and KYC (stage 5).
+> **Status: stage 5.** Sign-in, accounts, transfers, exchange, orders, idempotency, the
+> Slow and Flaky networks, an OpenAPI contract the tests enforce, the apps talking to it
+> (`CHAOSBANK_BACKEND` / `-ChaosBankBackend`), a live price feed over WebSocket, KYC on
+> the server, and 17 server-side defects.
 
 ## Run it
 
@@ -53,7 +53,8 @@ ways, dates are epoch seconds, errors are [RFC 9457](https://www.rfc-editor.org/
 | auth | `POST /v1/auth/login`, `/otp`, `/otp/resend`, `/refresh`, `/logout` |
 | accounts | `GET /v1/accounts`, `/v1/accounts/{currency}`, `/v1/transactions?limit=&cursor=` |
 | money | `POST /v1/transfers`, `/v1/deposits`, `/v1/exchanges`; `GET /v1/fx/rates` |
-| markets | `GET /v1/assets`, `/v1/holdings`, `/v1/orders`; `POST /v1/orders` |
+| markets | `GET /v1/assets`, `/v1/quotes`, `/v1/holdings`, `/v1/orders`; `POST /v1/orders`; WebSocket `/v1/prices/stream` |
+| KYC | `GET /v1/kyc/status`, `POST /v1/kyc/submissions` |
 
 **Money writes need an `Idempotency-Key`.** A repeat with the same key and body answers the
 first success again (with `Idempotent-Replayed: true`) and moves no money. The same key
@@ -63,6 +64,17 @@ on a different body is refused with `idempotencyKeyReused`.
 the apps' fixed rates. Orders fill at once, a market order at the `referencePrice` the
 client showed and a limit order at its limit, as in the apps' mock. Server-side
 pricing arrives with the live price feed in stage 5.
+
+**Live prices.** Each session runs the apps' simulated feed step for step: the same
+seeded random walk, one tick per 700 ms, so the same seed shows the same prices as the
+app's own feed. `GET /v1/quotes` returns the latest tick. The WebSocket
+`/v1/prices/stream` takes the same session and token headers as REST and sends one
+`{"seq", "quotes"}` frame per tick, the current prices first.
+
+**KYC.** The client sends what its document scan and face check read, and the server
+decides with the apps' rules, in their order: an expired document, then a name other
+than the account holder's, then a face that doesn't match is rejected. A session starts
+verified, as the apps do. Expiry is judged on the session's clock.
 
 A clean session answers exactly what the apps' embedded mock does. `CleanParityTest`
 checks that against golden files generated from the app's own `SeedData`
@@ -100,7 +112,7 @@ for demos and take-home assignments. `JWT_SECRET` keeps tokens valid across rest
 
 ## Server defects
 
-Twelve, each one guarded deviation with a test pair: green on a clean session, red under
+Seventeen, each one guarded deviation with a test pair: green on a clean session, red under
 exactly that defect. `GET /chaos/catalog` lists them with their requirement and the task
 a tester is given. Ids match the apps' where it's the same defect, so an app running
 against the server forwards it and it behaves as on the embedded mock.
@@ -119,8 +131,13 @@ against the server forwards it and it behaves as on the embedded mock.
 | `negativeAmountCredits` | Money | a negative transfer adds money |
 | `fxRateStaleOnServer` | Money | an exchange is credited at a rate other than the one it reports |
 | `contractFieldRenamed` | Contract | one endpoint calls `balance` `amount` |
+| `wsPricesOutOfOrder` | Realtime | the price stream sends ticks in swapped pairs (seq 2, 1, 4, 3…) |
+| `kycAcceptsExpiredDocument` | Validation | an expired document passes KYC |
+| `kycNameMismatchAccepted` | Validation | someone else's document passes KYC |
+| `kycSelfieMismatchAccepted` | Validation | a face that doesn't match passes KYC |
+| `kycStuckPending` | State | a passing check stays pending |
 
-Profiles: `money`, `state`, `network`, `contract`, `all`.
+Profiles: `money`, `state`, `network`, `contract`, `realtime`, `kyc`, `all`.
 
 Some are invisible in a clean app's UI on purpose. For example, a 504 with the money
 gone looks like an ordinary error until you check the balance. Others only show through
